@@ -589,16 +589,19 @@ EnsembleContext::InitStep(const size_t step_idx, std::unique_ptr<Step>* step)
     irequest->AddOriginalRequestedOutput(pair.first);
   }
 
+  step->reset(new Step(step_idx));
+
   irequest->SetCorrelationId(correlation_id_);
   irequest->SetFlags(flags_);
   irequest->SetPriority(priority_);
-#ifdef TRTIS_ENABLE_STATS
+#ifdef TRITON_ENABLE_STATS
   irequest->SetSecondaryStatsAggregator(&context_stats_aggregator_);
 #endif
+  irequest->SetResponseCallback(reinterpret_cast<ResponseAllocator*>(allocator_.get()), &(*step)->output_map_ ,ResponseComplete, step->get());
+  irequest->SetReleaseCallback(RequestComplete, step->get());
 
   RETURN_IF_ERROR(irequest->PrepareForInference());
 
-  step->reset(new Step(step_idx));
   (*step)->request_ = std::move(irequest);
 
   return Status::Success;
@@ -617,7 +620,7 @@ EnsembleContext::FinishEnsemble()
         ensemble_status_.StatusCode(), "in ensemble '" + info_->ensemble_name_ +
                                            "', " + ensemble_status_.Message());
   }
-#ifdef TRTIS_ENABLE_STATS
+#ifdef TRITON_ENABLE_STATS
   const auto& infer_stats = context_stats_aggregator_.ImmutableInferStats();
   request_->ReportStatisticsWithDuration(
       metric_reporter_, ensemble_status_.IsOk(), compute_start_ns_,
@@ -756,6 +759,7 @@ EnsembleScheduler::Enqueue(std::unique_ptr<InferenceRequest>& request)
       metric_reporter_.get(), stats_aggregator_, is_, info_.get(), request,
       stream_));
   EnsembleContext::Proceed(context);
+  return Status::Success;
 }
 
 EnsembleScheduler::EnsembleScheduler(
@@ -773,12 +777,12 @@ EnsembleScheduler::EnsembleScheduler(
   }
 #endif  // TRITON_ENABLE_GPU
 
-#ifdef TRTIS_ENABLE_METRICS
+#ifdef TRITON_ENABLE_METRICS
   if (Metrics::Enabled()) {
     metric_reporter_.reset(
         new MetricModelReporter(config.name(), 1, -1, config.metric_tags()));
   }
-#endif  // TRTIS_ENABLE_METRICS
+#endif  // TRITON_ENABLE_METRICS
 
   // Set 'info_' based on 'config'
   info_.reset(new EnsembleInfo());
